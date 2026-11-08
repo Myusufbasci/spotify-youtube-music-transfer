@@ -11,12 +11,12 @@ from bs4 import BeautifulSoup
 
 class SpotifyScraper:
     """
-    API anahtarı gerektirmeden Spotify Playlist, Album veya Track linklerinden
-    şarkı listesini (isim, sanatçı, albüm, süre, spotify_id) çeker.
-    - Herkese açık listelerde: Playwright headless + Spotify Pathfinder GraphQL pagination (offset=0,100,200...)
-      ile 1000+ şarkılık listeleri bile saniyeler içinde eksiksiz çeker.
-    - Gizli (Private / pt=... token'lı) listelerde: Otomatik olarak görünür tarayıcı (headed) açarak
-      oturum üzerinden tüm şarkıları çeker.
+    Fetches track lists (name, artists, album, duration, spotify_id) from Spotify
+    Playlist, Album, or Track URLs without requiring any API key.
+    - Public playlists/albums: Uses headless Playwright + Spotify Pathfinder GraphQL
+      pagination (offset=0, 100, 200...) to fetch 1000+ tracks in seconds.
+    - Private / invite-token (pt=...) playlists: Automatically opens a visible browser
+      session if login is required.
     """
 
     USER_AGENT = (
@@ -31,7 +31,7 @@ class SpotifyScraper:
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": self.USER_AGENT,
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9,tr-TR;q=0.8",
         })
 
     @staticmethod
@@ -60,11 +60,11 @@ class SpotifyScraper:
     def fetch_from_url(self, url: str, allow_visible_browser_for_private: bool = True) -> Dict:
         item_type, item_id = self.parse_spotify_url(url)
         if not item_type or not item_id:
-            raise ValueError(f"Geçersiz Spotify linki: {url}")
+            raise ValueError(f"Invalid Spotify URL: {url}")
 
-        print(f"[Spotify] '{item_type}/{item_id}' okunuyor...")
+        print(f"[Spotify] Reading '{item_type}/{item_id}'...")
 
-        # 1. Önce Playwright Headless + GraphQL Pagination ile tam listeyi çekmeyi dene
+        # 1. Headless Playwright + GraphQL Pagination
         pw_result, needs_login = self._scrape_via_pathfinder(
             item_type=item_type,
             item_id=item_id,
@@ -73,17 +73,15 @@ class SpotifyScraper:
         )
         if pw_result and pw_result.get("tracks"):
             print(
-                f"[Spotify] '{pw_result['title']}' listesinden "
-                f"{len(pw_result['tracks'])}/{pw_result.get('total_count', len(pw_result['tracks']))} şarkı çekildi."
+                f"[Spotify] Fetched {len(pw_result['tracks'])}/{pw_result.get('total_count', len(pw_result['tracks']))} "
+                f"tracks from '{pw_result['title']}'."
             )
             return pw_result
 
-        # 2. Eğer gizli liste olduğu için login'e yönlendirdiyse (örn. &pt=... linkleri):
+        # 2. Visible browser fallback if playlist is private and requires login
         if needs_login and allow_visible_browser_for_private:
-            print(
-                f"\n[Spotify Gizli Liste Algılandı] '{url}' gizli bir liste olduğu için Spotify girişi gerekiyor."
-            )
-            print("[Spotify] Görünür tarayıcı açılıyor, lütfen Spotify hesabınızla giriş yapın...")
+            print(f"\n[Spotify Private Playlist] '{url}' requires a signed-in Spotify session.")
+            print("[Spotify] Launching visible browser...")
             pw_vis_result, _ = self._scrape_via_pathfinder(
                 item_type=item_type,
                 item_id=item_id,
@@ -93,17 +91,17 @@ class SpotifyScraper:
             )
             if pw_vis_result and pw_vis_result.get("tracks"):
                 print(
-                    f"[Spotify] Gizli liste '{pw_vis_result['title']}' başarıyla çekildi "
-                    f"({len(pw_vis_result['tracks'])} şarkı)."
+                    f"[Spotify] Fetched private playlist '{pw_vis_result['title']}' "
+                    f"({len(pw_vis_result['tracks'])} tracks)."
                 )
                 return pw_vis_result
 
-        # 3. Yedek: Embed sayfası
+        # 3. Embed page fallback
         embed_result = self._try_embed_fallback(item_type, item_id, url)
         if embed_result and embed_result.get("tracks"):
             return embed_result
 
-        raise RuntimeError(f"Spotify linkinden şarkılar çekilemedi: {url}")
+        raise RuntimeError(f"Failed to fetch tracks from Spotify URL: {url}")
 
     def _scrape_via_pathfinder(
         self,
@@ -113,11 +111,6 @@ class SpotifyScraper:
         headless: bool = True,
         login_timeout_sec: int = 15,
     ) -> Tuple[Optional[Dict], bool]:
-        """
-        Playwright ile Spotify sayfasını açar, `fetchPlaylist` GraphQL isteğini yakalar
-        ve `offset=0, 100, 200...` döngüsüyle tüm şarkıları eksiksiz çeker.
-        Dönüş: (result_dict, needs_login_bool)
-        """
         from playwright.sync_api import sync_playwright
 
         captured_req: Dict = {}
@@ -192,7 +185,6 @@ class SpotifyScraper:
                     context.close()
                     return None, redirected_to_login
 
-                # İlk sayfadan başlık, toplam sayı ve ilk şarkıları çıkar
                 pl_v2 = first_page_data.get("data", {}).get("playlistV2", {})
                 title = pl_v2.get("name") or f"Spotify {item_type.capitalize()}"
                 content = pl_v2.get("content", {})
@@ -201,7 +193,6 @@ class SpotifyScraper:
                 all_tracks: List[Dict] = []
                 self._extract_tracks_from_pathfinder(first_page_data, all_tracks)
 
-                # Eğer listede ilk sayfadan (genelde 25 şarkı) daha fazlası varsa 100'er 100'er kalanları çek
                 offset = len(content.get("items", []))
                 while offset < total_count:
                     page_json = page.evaluate(
@@ -237,7 +228,6 @@ class SpotifyScraper:
 
                 context.close()
 
-                # Tekrarlayanları temizle (sırayı koruyarak)
                 unique_tracks = []
                 seen = set()
                 for idx, t in enumerate(all_tracks):
@@ -256,7 +246,7 @@ class SpotifyScraper:
                 }, False
 
         except Exception as e:
-            print(f"[Spotify Pathfinder Uyarı] {e}")
+            print(f"[Spotify Pathfinder Warning] {e}")
             return None, redirected_to_login
 
     def _try_embed_fallback(self, item_type: str, item_id: str, original_url: str) -> Optional[Dict]:

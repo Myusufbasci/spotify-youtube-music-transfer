@@ -1,4 +1,3 @@
-import json
 import os
 import time
 from pathlib import Path
@@ -9,12 +8,8 @@ from ytmusicapi import YTMusic
 
 class YTMusicSaver:
     """
-    Bulunan YouTube Music şarkılarını (videoId listesini) API anahtarı olmadan
-    kullanıcının YouTube Music hesabına kaydeder:
-    1. Görünür Tarayıcı (Playwright) açarak kullanıcının giriş yapmasını bekler,
-       oturum başlıklarını (Cookie + SAPISIDHASH) otomatik yakalar ve tüm şarkıları
-       saniyeler içinde yeni bir YouTube Music çalma listesine kaydeder.
-    2. Ayrıca giriş gerektirmeyen hızlı YouTube toplu çalma listesi linkleri üretir.
+    Utility class for generating instant YouTube playback queue URLs (no login required)
+    and optionally saving playlists via a visible Playwright browser session.
     """
 
     def __init__(self, base_dir: Optional[str] = None):
@@ -25,8 +20,7 @@ class YTMusicSaver:
     @staticmethod
     def generate_instant_playlist_urls(video_ids: List[str]) -> List[Dict[str, str]]:
         """
-        Giriş yapmadan bile tarayıcıda doğrudan kuyruk/liste olarak açılan
-        YouTube linklerini (50'şerli gruplar halinde) oluşturur.
+        Generates instant YouTube watch_videos queue URLs in batches of 50 tracks.
         """
         chunks = [video_ids[i : i + 50] for i in range(0, len(video_ids), 50)]
         links = []
@@ -34,7 +28,7 @@ class YTMusicSaver:
             ids_str = ",".join(chunk)
             yt_url = f"https://www.youtube.com/watch_videos?video_ids={ids_str}"
             ytm_url = f"https://music.youtube.com/watch?v={chunk[0]}&list=RDAMVM{chunk[0]}"
-            label = f"Bölüm {idx} ({len(chunk)} Şarkı)" if len(chunks) > 1 else f"Tüm Liste ({len(chunk)} Şarkı)"
+            label = f"Part {idx} ({len(chunk)})" if len(chunks) > 1 else f"Full Queue ({len(chunk)})"
             links.append({
                 "label": label,
                 "youtube_queue_url": yt_url,
@@ -54,21 +48,12 @@ class YTMusicSaver:
         privacy_status: str = "PRIVATE",
         timeout_sec: int = 240,
     ) -> Dict:
-        """
-        1. Eğer daha önce kaydedilmiş geçerli bir oturum (`browser_auth.json`) varsa önce onunla hızlıca dener.
-        2. Yoksa veya süresi dolmuşsa GÖRÜNÜR TARAYICI (Playwright) açar:
-           - Kullanıcı `music.youtube.com` üzerinde Google hesabına giriş yapar (veya zaten açıktır).
-           - Tarayıcıdan yapılan ilk `youtubei/v1/` isteğinin başlıkları otomatik yakalanır.
-           - Yakalanan oturumla çalma listesi oluşturulup tüm şarkılar eklenir ve tarayıcıda yeni liste açılır.
-        """
         clean_ids = [vid for vid in dict.fromkeys(video_ids) if vid]
         if not clean_ids:
-            return {"success": False, "error": "Kaydedilecek şarkı (videoId) bulunamadı."}
+            return {"success": False, "error": "No valid videoId items to save."}
 
-        # Önce kayıtlı oturum varsa dene
         if self.auth_file.exists():
             try:
-                print("[YTMusic Saver] Kayıtlı oturum bulundu, çalma listesi oluşturuluyor...")
                 ytm = YTMusic(str(self.auth_file))
                 playlist_id = ytm.create_playlist(
                     title=title,
@@ -78,18 +63,16 @@ class YTMusicSaver:
                 )
                 if playlist_id and not isinstance(playlist_id, dict):
                     pl_url = f"https://music.youtube.com/playlist?list={playlist_id}"
-                    print(f"[YTMusic Saver] Başarılı! Çalma listesi: {pl_url}")
                     return {
                         "success": True,
                         "playlist_id": playlist_id,
                         "playlist_url": pl_url,
                         "added_count": len(clean_ids),
-                        "method": "Kayıtlı Tarayıcı Oturumu",
+                        "method": "Saved Browser Session",
                     }
-            except Exception as e:
-                print(f"[YTMusic Saver] Kayıtlı oturum geçersiz veya süresi dolmuş, görünür tarayıcı açılıyor... ({e})")
+            except Exception:
+                pass
 
-        # Görünür tarayıcı aç ve oturum yakala
         return self._launch_browser_and_create_playlist(
             title=title,
             description=description,
@@ -119,16 +102,9 @@ class YTMusicSaver:
                 if "SAPISIDHASH" in auth and ("SAPISID" in cookie or "__Secure-3PAPISID" in cookie):
                     captured_headers = dict(headers)
 
-        print("\n" + "=" * 65)
-        print("[GÖRÜNÜR TARAYICI AÇILIYOR]")
-        print("1. Açılan tarayıcı penceresinde YouTube Music'e Google hesabınızla giriş yapın.")
-        print("2. Giriş yaptığınız anda oturum otomatik algılanacak ve çalma listeniz oluşturulacaktır!")
-        print("=" * 65 + "\n")
-
         self.profile_dir.mkdir(parents=True, exist_ok=True)
 
         with sync_playwright() as p:
-            # Kalıcı profil ile görünür tarayıcı başlat (Google login engeline takılmamak için gerçek Chrome kanalı varsa kullan)
             launch_kwargs = {
                 "user_data_dir": str(self.profile_dir),
                 "headless": False,
@@ -155,11 +131,9 @@ class YTMusicSaver:
             while time.time() - start_time < timeout_sec:
                 if captured_headers:
                     break
-                # Eğer kullanıcı giriş yaptıysa bir API isteği tetiklemek için çerezleri kontrol et
                 cookies = context.cookies("https://music.youtube.com")
                 cookie_names = {c["name"] for c in cookies}
                 if ("SAPISID" in cookie_names or "__Secure-3PAPISID" in cookie_names) and "music.youtube.com" in page.url:
-                    # Sayfada ufak bir etkileşim veya yenileme ile youtubei/v1 POST isteği tetikle
                     try:
                         page.evaluate("window.scrollBy(0, 100)")
                     except Exception:
@@ -170,18 +144,11 @@ class YTMusicSaver:
                 context.close()
                 return {
                     "success": False,
-                    "error": "Süre doldu veya YouTube Music girişi algılanamadı. Lütfen tekrar deneyin.",
+                    "error": "Timed out waiting for YouTube Music sign-in.",
                 }
 
-            # Yakalanan başlıkları ytmusicapi formatına çevir ve kaydet
-            raw_header_lines = []
-            for k, v in captured_headers.items():
-                if not k.startswith(":"):
-                    raw_header_lines.append(f"{k}: {v}")
-            raw_headers_str = "\n".join(raw_header_lines)
-
-            ytmusicapi.setup(filepath=str(self.auth_file), headers_raw=raw_headers_str)
-            print("[YTMusic Saver] Oturum başarıyla yakalandı! Çalma listesi oluşturuluyor...")
+            raw_header_lines = [f"{k}: {v}" for k, v in captured_headers.items() if not k.startswith(":")]
+            ytmusicapi.setup(filepath=str(self.auth_file), headers_raw="\n".join(raw_header_lines))
 
             ytm = YTMusic(str(self.auth_file))
             playlist_id = ytm.create_playlist(
@@ -195,13 +162,10 @@ class YTMusicSaver:
                 context.close()
                 return {
                     "success": False,
-                    "error": f"Çalma listesi oluşturulamadı: {playlist_id}",
+                    "error": f"Failed to create playlist: {playlist_id}",
                 }
 
             pl_url = f"https://music.youtube.com/playlist?list={playlist_id}"
-            print(f"[YTMusic Saver] Çalma listesi oluşturuldu ({len(video_ids)} şarkı): {pl_url}")
-
-            # Oluşturulan çalma listesini tarayıcıda kullanıcıya göster
             try:
                 page.goto(pl_url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(4000)
@@ -214,5 +178,5 @@ class YTMusicSaver:
                 "playlist_id": playlist_id,
                 "playlist_url": pl_url,
                 "added_count": len(video_ids),
-                "method": "Görünür Tarayıcı Otomasyonu",
+                "method": "Visible Browser Automation",
             }

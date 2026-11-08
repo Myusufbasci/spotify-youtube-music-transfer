@@ -9,21 +9,19 @@ from ytmusicapi import YTMusic
 
 class YTMusicLyricsMatcher:
     """
-    Spotify şarkılarını YouTube Music üzerinde arar ve eşleştirir:
-    1. Aşama: Doğrudan İsim + Sanatçı + Süre ile bire bir eşleştirme (Official Songs & Videos).
-       - Yerel dosyaları (sanatçısı boş olup başlığında 'Sanatçı - Şarkı' yazanları) otomatik ayrıştırır.
-       - Spotify'a farklı/sahte sanatçı adıyla yüklenmiş (re-upload) parçaları yakalamak için
-         sanatçı uyumu düşük kaldığında salt şarkı adı ve söz aramasına geçer.
-    2. Aşama (Bire bir bulunamazsa veya güven skoru düşükse):
-       - Şarkının sözlerini (LRCLIB, Lyrics.ovh, Web) çeker,
-       - Ayırt edici söz dizeleriyle YouTube Music'te arama yapar,
-       - Aday şarkıların YouTube Music gömülü sözleriyle karşılaştırarak doğrular.
+    Matches Spotify tracks on YouTube Music:
+    1. Stage 1 (Direct Match): Compares Track Name + Artist + Duration across Official Songs and Videos.
+       - Automatically parses local files where artist is empty and title is formatted as 'Artist - Title'.
+       - Falls back to title-only search when a track was re-uploaded under a pseudo-artist name.
+    2. Stage 2 (Lyrics Fallback Matcher):
+       - Fetches full lyrics via LRCLIB, Lyrics.ovh, or web search.
+       - Extracts distinctive lyric lines to search YouTube Music.
+       - Verifies candidates by comparing embedded YouTube Music lyrics against the source lyrics.
     """
 
     DIRECT_MATCH_THRESHOLD = 85.0
 
     def __init__(self, language: str = "en"):
-        # ytmusicapi filter="songs" ayrıştırıcısı language="en" ile resmi şarkı kataloğunu eksiksiz tarar
         self.ytmusic = YTMusic(language="en")
         self.session = requests.Session()
         self.session.headers.update({
@@ -36,7 +34,7 @@ class YTMusicLyricsMatcher:
 
     @staticmethod
     def clean_track_name(name: str) -> str:
-        """Parantez içi Remastered, feat., Radio Edit vb. ekleri temizler."""
+        """Strips parenthetical noise such as Remastered, feat., Radio Edit, etc."""
         cleaned = re.sub(
             r"\s*[\(\[][^)\]]*(remaster|feat|ft\.|version|edit|mix|live|mono|stereo|deluxe|bonus|from|original)[^)\]]*[\)\]]",
             "",
@@ -62,8 +60,7 @@ class YTMusicLyricsMatcher:
     @staticmethod
     def parse_local_or_combined_title(name: str, artist_str: str) -> Tuple[str, str]:
         """
-        Spotify yerel dosyalarında (Local Files) sanatçı alanı boş olup
-        şarkı adında 'Sanatçı - Şarkı Adı' veya 'Şarkı Adı - Sanatçı' yazıyorsa ayrıştırır.
+        Parses 'Artist - Track Name' when the Spotify track is a Local File with an empty artist field.
         """
         if artist_str.strip():
             return name.strip(), artist_str.strip()
@@ -87,7 +84,7 @@ class YTMusicLyricsMatcher:
         artist_str = raw_artist_str or parsed_artist
         clean_name = self.clean_track_name(parsed_name)
 
-        # 1. AŞAMA: Doğrudan YouTube Music Araması (Songs + Videos)
+        # Stage 1: Direct YouTube Music Search (Songs + Videos)
         direct_candidates = []
         if not force_lyrics:
             direct_candidates = self._search_direct_candidates(
@@ -100,14 +97,14 @@ class YTMusicLyricsMatcher:
             return {
                 "spotify": sp_track,
                 "status": "direct_match",
-                "match_method": "Bire Bir Eşleşme",
+                "match_method": "Direct Match",
                 "confidence": round(best_direct["score"], 1),
                 "yt_match": best_direct,
                 "lyrics_info": None,
                 "alternatives": direct_candidates[1:5],
             }
 
-        # 2. AŞAMA: Bire bir bulunamadıysa veya skor düşükse SÖZLERLE EŞLEŞTİRME (Lyrics Matching)
+        # Stage 2: Lyrics Fallback Matching
         lyrics_text, lyrics_source = self.fetch_track_lyrics(parsed_name, clean_name, primary_artist, duration_sec)
 
         lyrics_candidates = []
@@ -138,9 +135,9 @@ class YTMusicLyricsMatcher:
                 else ("direct_match" if best["score"] >= 75 else "low_confidence")
             )
             method_label = (
-                f"Sözlerle Eşleşti ({lyrics_source})"
+                f"Lyrics Match ({lyrics_source})"
                 if is_lyrics_winner
-                else ("Yakın Eşleşme" if status == "low_confidence" else "Bire Bir Eşleşme")
+                else ("Close Match" if status == "low_confidence" else "Direct Match")
             )
             return {
                 "spotify": sp_track,
@@ -165,7 +162,7 @@ class YTMusicLyricsMatcher:
         return {
             "spotify": sp_track,
             "status": "not_found",
-            "match_method": "Bulunamadı",
+            "match_method": "Not Found",
             "confidence": 0.0,
             "yt_match": None,
             "lyrics_info": {
@@ -189,7 +186,6 @@ class YTMusicLyricsMatcher:
         else:
             queries.append(name.strip())
 
-        # Sahte sanatçı adıyla yüklenmiş (re-upload) şarkılar için yedek olarak salt şarkı adı sorgusu
         if clean_name and clean_name not in queries:
             queries.append(clean_name)
 
@@ -256,14 +252,12 @@ class YTMusicLyricsMatcher:
         norm_sp_all_artists = self.normalize_text(sp_artist_str)
         norm_yt_artist = self.normalize_text(yt_artist_str)
 
-        # 1. Başlık benzerliği (0-100)
         title_sim = max(
             fuzz.ratio(norm_sp_name, norm_yt_title),
             fuzz.ratio(norm_sp_clean, norm_yt_clean),
             fuzz.token_sort_ratio(norm_sp_clean, norm_yt_clean) * 0.96,
         )
 
-        # Video başlığı "Sanatçı - Şarkı Adı" formatındaysa parçalayarak da kontrol et
         if "-" in yt_title:
             parts = [self.normalize_text(p) for p in yt_title.split("-", 1)]
             for p in parts:
@@ -275,9 +269,7 @@ class YTMusicLyricsMatcher:
                         fuzz.token_sort_ratio(norm_sp_clean, p_clean) * 0.95,
                     )
 
-        # 2. Sanatçı benzerliği (0-100)
         if not norm_sp_artist:
-            # Yerel dosya / sanatçısı belirtilmemiş şarkılarda başlık içinde eşleşme varsa
             artist_sim = 88.0 if title_sim >= 85 else 60.0
         else:
             channel_artist_sim = max(
@@ -287,7 +279,6 @@ class YTMusicLyricsMatcher:
             title_artist_sim = min(72.0, fuzz.partial_ratio(norm_sp_artist, norm_yt_title) * 0.75)
             artist_sim = max(channel_artist_sim, title_artist_sim)
 
-            # Eğer Spotify'a sahte sanatçı adıyla yüklenmiş bir şarkıysa ama başlık %95+ ve süre bire bir aynıysa:
             if (
                 allow_reupload_artist_override
                 and artist_sim < 50
@@ -298,7 +289,6 @@ class YTMusicLyricsMatcher:
             ):
                 artist_sim = 82.0
 
-        # 3. Süre uyumu (-18 ile +6 puan arası)
         duration_bonus = 0.0
         if sp_duration > 0 and yt_duration > 0:
             diff = abs(sp_duration - yt_duration)
@@ -311,10 +301,8 @@ class YTMusicLyricsMatcher:
             elif diff > 45:
                 duration_bonus = -18.0
 
-        # 4. Resmi şarkı (song) bonusu
         type_bonus = 9.0 if search_filter == "songs" else 0.0
 
-        # İstenmeyen cover/karaoke/instrumental/backing track cezası
         penalty = 0.0
         bad_keywords = (
             "karaoke",
@@ -351,7 +339,7 @@ class YTMusicLyricsMatcher:
             "artists": yt_artist_str,
             "album": yt_item.get("album", {}).get("name", "") if isinstance(yt_item.get("album"), dict) else "",
             "duration_sec": yt_duration,
-            "resultType": "Resmi Şarkı" if search_filter == "songs" else "Video",
+            "resultType": "Official Song" if search_filter == "songs" else "Video",
             "url": f"https://music.youtube.com/watch?v={vid}",
             "thumbnail": thumb_url,
             "score": round(final_score, 1),
@@ -365,7 +353,6 @@ class YTMusicLyricsMatcher:
     def fetch_track_lyrics(
         self, name: str, clean_name: str, artist: str, duration_sec: int = 0
     ) -> Tuple[Optional[str], Optional[str]]:
-        # 1. LRCLIB Doğrudan Get
         if artist:
             for track_query in (name, clean_name):
                 try:
@@ -381,7 +368,6 @@ class YTMusicLyricsMatcher:
                 except Exception:
                     pass
 
-        # 2. LRCLIB Search (Hem sanatçılı hem de sahte sanatçılı yüklemeler için salt şarkı adıyla)
         search_queries = [f"{clean_name} {artist}".strip(), clean_name] if artist else [clean_name]
         for q_str in search_queries:
             if not q_str:
@@ -409,7 +395,6 @@ class YTMusicLyricsMatcher:
             except Exception:
                 pass
 
-        # 3. Lyrics.ovh
         if artist and clean_name:
             try:
                 ovh_url = (
@@ -423,7 +408,6 @@ class YTMusicLyricsMatcher:
             except Exception:
                 pass
 
-        # 4. Web Araması
         web_lyrics = self._scrape_lyrics_from_web(clean_name, artist)
         if web_lyrics:
             return web_lyrics, "Web Lyrics"
@@ -431,7 +415,7 @@ class YTMusicLyricsMatcher:
         return None, None
 
     def _scrape_lyrics_from_web(self, clean_name: str, artist: str) -> Optional[str]:
-        query = f"{clean_name} {artist} şarkı sözleri lyrics".strip()
+        query = f"{clean_name} {artist} lyrics".strip()
         try:
             resp = self.session.get(
                 "https://html.duckduckgo.com/html/",

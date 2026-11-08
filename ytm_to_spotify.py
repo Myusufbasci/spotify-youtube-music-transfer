@@ -12,9 +12,10 @@ from lyrics_matcher import YTMusicLyricsMatcher
 
 class YTMToSpotifyMatcher:
     """
-    YouTube / YouTube Music çalma listelerini veya şarkılarını API anahtarı olmadan okur,
-    Spotify kataloğunda (Pathfinder GraphQL searchDesktop) arar ve bire bir bulunamayan
-    şarkıları sözleriyle (YTMusic gömülü sözler + LRCLIB + Web Lyrics) eşleştirir.
+    Reads YouTube / YouTube Music playlists or tracks without an API key,
+    searches the Spotify catalog via Pathfinder GraphQL (searchDesktop),
+    and falls back to lyrics matching (embedded YTMusic lyrics + LRCLIB + Web Lyrics)
+    when direct title/artist matching is uncertain.
     """
 
     DIRECT_MATCH_THRESHOLD = 84.0
@@ -34,9 +35,6 @@ class YTMToSpotifyMatcher:
 
     @staticmethod
     def parse_youtube_url(url: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        YouTube / YouTube Music URL'sinden ('playlist' | 'track', id) döner.
-        """
         url = url.strip()
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
@@ -57,25 +55,22 @@ class YTMToSpotifyMatcher:
         return None, None
 
     def fetch_from_url(self, url: str) -> Dict:
-        """
-        YouTube / YouTube Music linkinden şarkı listesini çeker.
-        """
         item_type, item_id = self.parse_youtube_url(url)
         if not item_type or not item_id:
-            raise ValueError(f"Geçersiz YouTube / YouTube Music bağlantısı: {url}")
+            raise ValueError(f"Invalid YouTube / YouTube Music URL: {url}")
 
-        print(f"[YouTube Music] '{item_type}/{item_id}' okunuyor...")
+        print(f"[YouTube Music] Reading '{item_type}/{item_id}'...")
 
         if item_type == "track":
             watch = self.ytmusic.get_watch_playlist(videoId=item_id)
             t_list = watch.get("tracks", [])
             if not t_list:
-                raise RuntimeError(f"YouTube şarkısı okunamadı: {url}")
+                raise RuntimeError(f"Failed to read YouTube track: {url}")
             t = t_list[0]
             artists = [a.get("name", "") for a in t.get("artists", []) if a.get("name")]
             dur_sec = self.lyrics_helper._parse_duration(t.get("length", ""))
             return {
-                "title": t.get("title", "YouTube Music Parçası"),
+                "title": t.get("title", "YouTube Music Track"),
                 "type": "track",
                 "id": item_id,
                 "url": url,
@@ -92,10 +87,9 @@ class YTMToSpotifyMatcher:
                 ],
             }
 
-        # Playlist okuma
         try:
             pl = self.ytmusic.get_playlist(item_id, limit=None)
-            title = pl.get("title", "YouTube Music Çalma Listesi")
+            title = pl.get("title", "YouTube Music Playlist")
             raw_tracks = pl.get("tracks", [])
             tracks = []
             for t in raw_tracks:
@@ -114,7 +108,7 @@ class YTMToSpotifyMatcher:
                     "videoId": vid or "",
                 })
             if tracks:
-                print(f"[YouTube Music] '{title}' listesinden {len(tracks)} şarkı çekildi.")
+                print(f"[YouTube Music] Fetched {len(tracks)} tracks from '{title}'.")
                 return {
                     "title": title,
                     "type": "playlist",
@@ -124,14 +118,13 @@ class YTMToSpotifyMatcher:
                     "tracks": tracks,
                 }
         except Exception as e:
-            print(f"[YTMusic Playlist Uyarı] {e}, standart YouTube sayfasından deneniyor...")
+            print(f"[YTMusic Playlist Warning] {e}, trying standard YouTube page fallback...")
 
-        # Yedek: Standart YouTube playlist sayfasından ytInitialData kazıma
         fallback = self._scrape_youtube_web_playlist(item_id, url)
         if fallback and fallback.get("tracks"):
             return fallback
 
-        raise RuntimeError(f"YouTube çalma listesi okunamadı (Gizli olmadığından emin olun): {url}")
+        raise RuntimeError(f"Could not read YouTube playlist (make sure it is public): {url}")
 
     def _scrape_youtube_web_playlist(self, list_id: str, original_url: str) -> Optional[Dict]:
         web_url = f"https://www.youtube.com/playlist?list={list_id}"
@@ -150,7 +143,7 @@ class YTMToSpotifyMatcher:
             title = (
                 data.get("metadata", {})
                 .get("playlistMetadataRenderer", {})
-                .get("title", "YouTube Çalma Listesi")
+                .get("title", "YouTube Playlist")
             )
             tabs = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
             tracks = []
@@ -199,10 +192,6 @@ class YTMToSpotifyMatcher:
             return None
 
     def _ensure_spotify_search_session(self):
-        """
-        Spotify Pathfinder searchDesktop için anonim authorization ve client-token başlıklarını
-        yakalar ve 25 dakika boyunca önbellekte tutar.
-        """
         with self._token_lock:
             if self._pathfinder_info and (time.time() - self._token_timestamp < 1500):
                 return self._pathfinder_info
@@ -236,14 +225,13 @@ class YTMToSpotifyMatcher:
                 browser.close()
 
             if not captured.get("headers"):
-                raise RuntimeError("Spotify anonim arama oturumu başlatılamadı.")
+                raise RuntimeError("Failed to initialize anonymous Spotify search session.")
 
             self._pathfinder_info = captured
             self._token_timestamp = time.time()
             return self._pathfinder_info
 
     def search_spotify_tracks(self, query: str, limit: int = 5) -> List[Dict]:
-        """Spotify Pathfinder searchDesktop üzerinden şarkı arar."""
         if not query.strip():
             return []
         info = self._ensure_spotify_search_session()
@@ -254,7 +242,6 @@ class YTMToSpotifyMatcher:
         try:
             r = self.session.post(info["url"], headers=info["headers"], json=body, timeout=10)
             if r.status_code in (401, 403):
-                # Token süresi dolmuşsa yenile
                 self._token_timestamp = 0
                 info = self._ensure_spotify_search_session()
                 r = self.session.post(info["url"], headers=info["headers"], json=body, timeout=10)
@@ -284,7 +271,7 @@ class YTMToSpotifyMatcher:
                 thumb = sources[0].get("url", "") if sources else ""
                 dur_ms = d.get("duration", {}).get("totalMilliseconds", 0)
                 results.append({
-                    "videoId": sp_id,  # Ortak veri şeması uyumu için Spotify Track ID
+                    "videoId": sp_id,
                     "spotify_id": sp_id,
                     "uri": d.get("uri", f"spotify:track:{sp_id}"),
                     "title": name,
@@ -301,12 +288,7 @@ class YTMToSpotifyMatcher:
 
     @staticmethod
     def clean_youtube_title_and_artist(raw_title: str, raw_channel: str) -> Tuple[str, str]:
-        """
-        YouTube video başlıklarındaki '(Official Video)', '[4K]', 'Şarkı Sözleri', 'Topic'
-        gibi gürültüleri temizler ve başlık 'Sanatçı - Şarkı' formatındaysa ayrıştırır.
-        """
         channel = re.sub(r"\s*-\s*Topic$", "", raw_channel, flags=re.IGNORECASE).strip()
-        # Plak şirketi / genel müzik kanalları
         label_channels = (
             "netd müzik", "poll production", "avrupa müzik", "dmc", "seyhan müzik",
             "dokuz sekiz müzik", "kalan müzik", "sony music", "mahzen media", "beşiktaş kültür merkezi",
@@ -325,10 +307,8 @@ class YTMToSpotifyMatcher:
             parts = [p.strip() for p in title.split(" - ", 1) if p.strip()]
             if len(parts) == 2:
                 left, right = parts[0], parts[1]
-                # Eğer kanal adı bir plak şirketiyse veya sol kısım kanal adıyla benziyorsa:
                 if is_label or not channel or fuzz.token_set_ratio(left.lower(), channel.lower()) >= 70:
                     return right, left
-                # Bazen de sağ kısım sanatçıdır
                 if fuzz.token_set_ratio(right.lower(), channel.lower()) >= 75:
                     return left, right
                 return right, left
@@ -344,7 +324,6 @@ class YTMToSpotifyMatcher:
         clean_name, parsed_artist = self.clean_youtube_title_and_artist(raw_title, raw_artist)
         clean_name = self.lyrics_helper.clean_track_name(clean_name)
 
-        # 1. AŞAMA: Doğrudan Spotify Araması
         direct_candidates = []
         if not force_lyrics:
             queries = []
@@ -372,16 +351,15 @@ class YTMToSpotifyMatcher:
         best_direct = direct_candidates[0] if direct_candidates else None
         if best_direct and best_direct["score"] >= self.DIRECT_MATCH_THRESHOLD and not force_lyrics:
             return {
-                "spotify": yt_track,  # Kaynak parça
+                "spotify": yt_track,
                 "status": "direct_match",
-                "match_method": "Bire Bir Eşleşme",
+                "match_method": "Direct Match",
                 "confidence": round(best_direct["score"], 1),
-                "yt_match": best_direct,  # Hedef (Spotify) eşleşmesi
+                "yt_match": best_direct,
                 "lyrics_info": None,
                 "alternatives": direct_candidates[1:5],
             }
 
-        # 2. AŞAMA: SÖZLERLE EŞLEŞTİRME (YTMusic gömülü sözler + LRCLIB + Web)
         lyrics_text = None
         lyrics_source = None
 
@@ -417,9 +395,9 @@ class YTMToSpotifyMatcher:
             is_lyrics = best.get("matched_by_lyrics", False) or (lyrics_text is not None and best_lyrics_sim >= 45)
             status = "lyrics_match" if is_lyrics else ("direct_match" if best["score"] >= 75 else "low_confidence")
             method_label = (
-                f"Sözlerle Eşleşti ({lyrics_source})"
+                f"Lyrics Match ({lyrics_source})"
                 if is_lyrics
-                else ("Yakın Eşleşme" if status == "low_confidence" else "Bire Bir Eşleşme")
+                else ("Close Match" if status == "low_confidence" else "Direct Match")
             )
             return {
                 "spotify": yt_track,
@@ -440,7 +418,7 @@ class YTMToSpotifyMatcher:
         return {
             "spotify": yt_track,
             "status": "not_found",
-            "match_method": "Bulunamadı",
+            "match_method": "Not Found",
             "confidence": 0.0,
             "yt_match": None,
             "lyrics_info": None,
@@ -510,7 +488,6 @@ class YTMToSpotifyMatcher:
         best_sim = 0.0
 
         for snip in snippets:
-            # 1. LRCLIB üzerinde söz dizesini aratıp gerçek şarkı/sanatçı adını bul ve Spotify'da arat
             try:
                 r = self.session.get("https://lrclib.net/api/search", params={"q": snip}, timeout=8)
                 if r.status_code == 200:
@@ -532,7 +509,6 @@ class YTMToSpotifyMatcher:
             except Exception:
                 pass
 
-            # 2. Doğrudan Spotify üzerinde söz dizesiyle arat
             for sp_item in self.search_spotify_tracks(snip, limit=3):
                 sid = sp_item["spotify_id"]
                 if sid not in cand_map:

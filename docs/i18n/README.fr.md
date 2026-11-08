@@ -1,0 +1,43 @@
+# Spotify ? YouTube Music
+
+**Languages:** [English](../../README.md) | [Türkçe](README.tr.md) | [Español](README.es.md) | [中文 (简体)](README.zh.md) | [हिन्दी](README.hi.md) | [العربية](README.ar.md) | [Português](README.pt.md) | [Русский](README.ru.md) | [日本語](README.ja.md) | [Deutsch](README.de.md) | **Français** | [한국어](README.ko.md) | [Italiano](README.it.md) | [Bahasa Indonesia](README.id.md) | [Tiếng Việt](README.vi.md) | [Polski](README.pl.md) | [Українська](README.uk.md) | [Nederlands](README.nl.md) | [ไทย](README.th.md) | [Svenska](README.sv.md)
+
+---
+
+> Transfert bidirectionnel de playlists et correspondance par paroles sans clé API
+
+Collez des liens Spotify pour chercher sur YouTube Music, ou des liens YouTube Music pour chercher sur Spotify.
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/Myusufbasci/spotify-to-ytmusic.git
+cd spotify-to-ytmusic
+
+pip install -r requirements.txt
+playwright install chromium
+python app.py --web --port 5050
+```
+
+Open `http://127.0.0.1:5050` in your browser.
+
+---
+
+## Guide d'enregistrement
+
+### 1. Enregistrer sur YouTube Music
+1. **Copier le script YouTube Music:** Copiez le script console qui créera automatiquement vos playlists.
+2. **Ouvrir YouTube Music dans un nouvel onglet:** Allez sur un onglet connecté à votre compte YouTube Music.
+3. **Coller dans la Console et appuyer sur Entrée:** Appuyez sur F12 → onglet Console, collez avec Ctrl+V et validez avec Entrée. (Si le navigateur demande une confirmation, tapez allow pasting puis Entrée.)
+
+### 2. Enregistrer sur Spotify
+1. **Copier les liens de titres Spotify:** Spotify permet de coller directement une liste de liens dans n'importe quelle playlist.
+2. **Ouvrir une playlist vide sur Spotify et faire Ctrl+V:** Créez une nouvelle playlist dans Spotify, cliquez dedans et faites Ctrl+V.
+
+---
+
+## License
+
+MIT

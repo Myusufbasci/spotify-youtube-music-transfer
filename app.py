@@ -11,6 +11,7 @@ from spotify_scraper import SpotifyScraper
 from lyrics_matcher import YTMusicLyricsMatcher
 from ytmusic_saver import YTMusicSaver
 from ytm_to_spotify import YTMToSpotifyMatcher
+from i18n import LANGUAGES, TRANSLATIONS
 
 app = Flask(__name__)
 
@@ -25,7 +26,7 @@ ytm_to_sp = YTMToSpotifyMatcher()
 STATE = {
     "running": False,
     "phase": "idle",
-    "message": "Hazır",
+    "message": "Ready",
     "current": 0,
     "total": 0,
     "playlists": [],
@@ -78,7 +79,7 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
     with STATE_LOCK:
         STATE["running"] = True
         STATE["phase"] = "scraping"
-        STATE["message"] = "Bağlantılar okunuyor..."
+        STATE["message"] = "Reading source URLs..."
         STATE["current"] = 0
         STATE["total"] = 0
 
@@ -93,7 +94,7 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
             direction = "ytm_to_sp" if is_yt else "sp_to_ytm"
 
             with STATE_LOCK:
-                STATE["message"] = f"{'YouTube Music' if is_yt else 'Spotify'} okunuyor: {u}"
+                STATE["message"] = f"Reading {'YouTube Music' if is_yt else 'Spotify'}: {u}"
 
             if is_yt:
                 src_data = ytm_to_sp.fetch_from_url(u)
@@ -117,9 +118,8 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
             matched_tracks = [None] * len(tracks)
 
             if direction == "ytm_to_sp":
-                # Spotify arama oturumunu iş parçacıklarından önce hazırla
                 with STATE_LOCK:
-                    STATE["message"] = "Spotify arama oturumu hazırlanıyor..."
+                    STATE["message"] = "Initializing Spotify search session..."
                 ytm_to_sp._ensure_spotify_search_session()
 
             def _worker(idx_track):
@@ -137,7 +137,7 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
                     STATE["current"] += 1
                     STATE["message"] = (
                         f"{STATE['current']} / {STATE['total']} — "
-                        f"{tr.get('name')} ({tr.get('artist_str') or 'Bilinmeyen Sanatçı'})"
+                        f"{tr.get('name')} ({tr.get('artist_str') or 'Unknown Artist'})"
                     )
                 return idx, res
 
@@ -148,7 +148,7 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
                     matched_tracks[idx] = res
 
             pl_result = {
-                "title": src_data.get("title", "Çalma Listesi"),
+                "title": src_data.get("title", "Playlist"),
                 "spotify_url": src_data.get("url", ""),
                 "direction": direction,
                 "total_tracks": len(tracks),
@@ -169,7 +169,7 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
         with STATE_LOCK:
             STATE["playlists"] = existing
             STATE["phase"] = "done"
-            STATE["message"] = f"Tamamlandı ({total_tracks} şarkı eşleştirildi)."
+            STATE["message"] = f"Completed ({total_tracks} tracks matched)."
             STATE["running"] = False
 
         return existing
@@ -177,14 +177,14 @@ def process_urls(urls: List[str], clear_existing: bool = False, max_workers: int
     except Exception as e:
         with STATE_LOCK:
             STATE["phase"] = "error"
-            STATE["message"] = f"Hata: {str(e)}"
+            STATE["message"] = f"Error: {str(e)}"
             STATE["running"] = False
         raise
 
 
 HTML_TEMPLATE = r"""
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -301,6 +301,23 @@ HTML_TEMPLATE = r"""
             display: flex;
             gap: 8px;
             align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .lang-select {
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .lang-select:hover {
+            border-color: #383842;
         }
 
         .btn {
@@ -491,7 +508,6 @@ HTML_TEMPLATE = r"""
             transition: width 0.25s ease;
         }
 
-        /* Guide Tabs */
         .guide-switch {
             display: inline-flex;
             background: var(--bg);
@@ -770,7 +786,7 @@ HTML_TEMPLATE = r"""
             text-transform: uppercase;
             letter-spacing: 0.04em;
             padding: 10px 16px;
-            text-align: left;
+            text-align: start;
             border-bottom: 1px solid var(--border);
             z-index: 2;
         }
@@ -892,19 +908,20 @@ HTML_TEMPLATE = r"""
                 <span>Spotify &harr; YouTube Music</span>
                 <span class="brand-tag mono">Bi-Directional</span>
             </div>
-            <div class="brand-sub">API anahtarsız, çift yönlü çalma listesi ve şarkı sözü (lyrics) eşleştirme aracı</div>
+            <div id="i18n_subtitle" class="brand-sub">Zero-API-key bi-directional playlist &amp; lyrics-aware matching engine</div>
         </div>
         <div class="topbar-actions">
+            <select id="langSelect" class="lang-select" onchange="changeLanguage(this.value)" aria-label="Language"></select>
             <button type="button" class="btn btn-sm" onclick="exportJSON()">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="7 10 12 15 17 10"></polyline>
                     <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                JSON İndir
+                <span id="i18n_export_json">Export JSON</span>
             </button>
-            <button type="button" class="btn btn-sm btn-ghost" onclick="clearAllPlaylists()">
-                Listeleri Temizle
+            <button type="button" id="i18n_clear_all" class="btn btn-sm btn-ghost" onclick="clearAllPlaylists()">
+                Clear All
             </button>
         </div>
     </header>
@@ -918,30 +935,30 @@ HTML_TEMPLATE = r"""
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
-                    Kaynak Bağlantılar (Spotify veya YouTube Music)
+                    <span id="i18n_source_links">Source Links (Spotify or YouTube Music)</span>
                 </div>
-                <span class="mono" style="font-size:11.5px; color:var(--text-muted)">Otomatik Yön Algılama</span>
+                <span id="i18n_auto_detect" class="mono" style="font-size:11.5px; color:var(--text-muted)">Auto-Direction</span>
             </div>
-            <div class="card-desc">
-                <strong>Spotify</strong> bağlantısı yapıştırırsanız YouTube Music'te; <strong>YouTube / YouTube Music</strong> bağlantısı yapıştırırsanız Spotify'da (bire bir + şarkı sözleriyle) eşleştirir.
+            <div id="i18n_input_desc" class="card-desc">
+                Paste public Spotify links to match on YouTube Music, or YouTube Music links to match on Spotify (direct + lyrics fallback).
             </div>
-            <textarea id="urlsInput" class="input-area mono" placeholder="https://open.spotify.com/playlist/...&#10;veya&#10;https://music.youtube.com/playlist?list=..."></textarea>
+            <textarea id="urlsInput" class="input-area mono" placeholder="https://open.spotify.com/playlist/...&#10;https://music.youtube.com/playlist?list=..."></textarea>
             <div class="input-footer">
                 <label class="checkbox-label">
                     <input type="checkbox" id="replaceCheck">
-                    <span>Mevcut listeleri temizleyip sıfırdan tara</span>
+                    <span id="i18n_replace_existing">Clear current lists and scan fresh</span>
                 </label>
                 <button type="button" id="startBtn" class="btn btn-primary" onclick="startProcess()">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"></polygon>
                     </svg>
-                    Şarkıları Tara ve Eşleştir
+                    <span id="i18n_scan_btn">Scan &amp; Match Tracks</span>
                 </button>
             </div>
 
             <div id="progressBox" class="progress-container">
                 <div class="progress-meta">
-                    <span id="progressText">Hazırlanıyor...</span>
+                    <span id="progressText">Preparing...</span>
                     <span id="progressPct" class="mono">0%</span>
                 </div>
                 <div class="progress-track">
@@ -957,11 +974,11 @@ HTML_TEMPLATE = r"""
                     <svg class="icon" style="color:var(--accent)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
-                    Hesaba Kayıt Rehberi
+                    <span id="i18n_guide_title">Account Save Guide</span>
                 </div>
                 <div class="guide-switch">
-                    <button type="button" id="guideTabYTM" class="guide-tab active" onclick="switchGuideMode('sp_to_ytm')">YouTube Music'e Kayıt</button>
-                    <button type="button" id="guideTabSP" class="guide-tab" onclick="switchGuideMode('ytm_to_sp')">Spotify'a Kayıt</button>
+                    <button type="button" id="guideTabYTM" class="guide-tab active" onclick="switchGuideMode('sp_to_ytm')">Save to YouTube Music</button>
+                    <button type="button" id="guideTabSP" class="guide-tab" onclick="switchGuideMode('ytm_to_sp')">Save to Spotify</button>
                 </div>
             </div>
 
@@ -970,9 +987,9 @@ HTML_TEMPLATE = r"""
                 <div class="step-item">
                     <div class="step-num mono">1</div>
                     <div class="step-body">
-                        <div class="step-title">YouTube Music Aktarım Kodunu Kopyalayın</div>
-                        <div class="step-text">
-                            Spotify'dan eşleştirilen çalma listelerini tek seferde oluşturacak konsol betiğini panoya kopyalayın.
+                        <div id="i18n_ytm_step1_title" class="step-title">Copy YouTube Music Transfer Script</div>
+                        <div id="i18n_ytm_step1_desc" class="step-text">
+                            Copy the one-time console script that creates all matched playlists in your account.
                         </div>
                         <div class="step-actions">
                             <button type="button" id="copyAllYTMBtn" class="btn btn-accent btn-sm" onclick="copyYTMConsoleScript(-1, this)">
@@ -980,16 +997,16 @@ HTML_TEMPLATE = r"""
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
-                                <span>Aktarım Kodunu Kopyala</span>
+                                <span id="i18n_copy_ytm_code">Copy Transfer Script</span>
                             </button>
                             <button type="button" class="btn btn-sm" onclick="toggleCodeDrawer()">
-                                <span id="toggleCodeLabel">Kodu Göster</span>
+                                <span id="toggleCodeLabel">Show Code</span>
                             </button>
                         </div>
                         <div id="codeDrawer" class="code-drawer">
                             <div class="code-box-header">
                                 <span class="mono">ytmusic_create_playlists.js</span>
-                                <button type="button" class="btn btn-sm" style="padding:2px 8px; font-size:11px;" onclick="copyFromCodeBox(this)">Kopyala</button>
+                                <button type="button" id="i18n_copy_btn_box" class="btn btn-sm" style="padding:2px 8px; font-size:11px;" onclick="copyFromCodeBox(this)">Copy</button>
                             </div>
                             <textarea id="manualCodeBox" class="code-pre" readonly onclick="this.select()"></textarea>
                         </div>
@@ -999,11 +1016,11 @@ HTML_TEMPLATE = r"""
                 <div class="step-item">
                     <div class="step-num mono">2</div>
                     <div class="step-body">
-                        <div class="step-title">YouTube Music'i Yeni Sekmede Açın</div>
-                        <div class="step-text">Oturumunuzun açık olduğu YouTube Music sekmesine geçin.</div>
+                        <div id="i18n_ytm_step2_title" class="step-title">Open YouTube Music in a New Tab</div>
+                        <div id="i18n_ytm_step2_desc" class="step-text">Switch to a browser tab where you are signed in to YouTube Music.</div>
                         <div class="step-actions">
                             <a href="https://music.youtube.com" target="_blank" rel="noopener" class="btn btn-sm">
-                                <span>music.youtube.com'u Aç</span>
+                                <span id="i18n_open_ytm">Open music.youtube.com</span>
                                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                     <polyline points="15 3 21 3 21 9"></polyline>
@@ -1017,11 +1034,11 @@ HTML_TEMPLATE = r"""
                 <div class="step-item">
                     <div class="step-num mono">3</div>
                     <div class="step-body">
-                        <div class="step-title">Konsola Yapıştırıp Çalıştırın</div>
+                        <div id="i18n_ytm_step3_title" class="step-title">Paste in Console &amp; Press Enter</div>
                         <div class="step-text">
-                            <kbd>F12</kbd> &rarr; <strong>Console</strong> sekmesine tıklayın, <kbd>Ctrl</kbd>+<kbd>V</kbd> yapıp <kbd>Enter</kbd>'a basın.
-                            <span style="display:block; margin-top:4px; color:var(--text-muted); font-size:11.5px;">
-                                İlk kez yapıştırıyorsanız tarayıcı güvenlik uyarısı sonrası konsola <kbd>allow pasting</kbd> (veya <kbd>yapıştırmaya izin ver</kbd>) yazıp Enter'a basın.
+                            <span id="i18n_ytm_step3_desc">Press F12 → Console tab, paste with Ctrl+V and press Enter.</span>
+                            <span id="i18n_ytm_step3_note" style="display:block; margin-top:4px; color:var(--text-muted); font-size:11.5px;">
+                                If prompted by the browser on first paste, type allow pasting and press Enter first.
                             </span>
                         </div>
                     </div>
@@ -1033,9 +1050,9 @@ HTML_TEMPLATE = r"""
                 <div class="step-item">
                     <div class="step-num mono">1</div>
                     <div class="step-body">
-                        <div class="step-title">Spotify Şarkı Bağlantılarını Kopyalayın</div>
-                        <div class="step-text">
-                            Spotify masaüstü ve web uygulaması, kopyalanan şarkı bağlantılarını doğrudan çalma listesine yapıştırmayı destekler (konsol açmaya gerek yoktur).
+                        <div id="i18n_sp_step1_title" class="step-title">Copy Spotify Track Links</div>
+                        <div id="i18n_sp_step1_desc" class="step-text">
+                            Spotify desktop and web apps natively support pasting copied track URLs directly into any playlist.
                         </div>
                         <div class="step-actions">
                             <button type="button" id="copyAllSPBtn" class="btn btn-accent btn-sm" onclick="copySpotifyTrackLinks(-1, this)">
@@ -1043,10 +1060,10 @@ HTML_TEMPLATE = r"""
                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
-                                <span>Spotify Şarkı Linklerini Kopyala</span>
+                                <span id="i18n_copy_sp_links">Copy Spotify Track Links</span>
                             </button>
                             <a href="https://open.spotify.com" target="_blank" rel="noopener" class="btn btn-sm">
-                                <span>open.spotify.com'u Aç ↗</span>
+                                <span id="i18n_open_sp">Open open.spotify.com ↗</span>
                             </a>
                         </div>
                     </div>
@@ -1055,9 +1072,9 @@ HTML_TEMPLATE = r"""
                 <div class="step-item">
                     <div class="step-num mono">2</div>
                     <div class="step-body">
-                        <div class="step-title">Spotify'da Boş Bir Çalma Listesi Açıp Ctrl+V Yapın</div>
-                        <div class="step-text">
-                            Spotify uygulamasında veya web sayfasında yeni bir çalma listesi oluşturun, listenin içine bir kez tıklayıp <kbd>Ctrl</kbd>+<kbd>V</kbd> (Yapıştır) tuşlarına basın. Tüm şarkılar anında eklenecektir.
+                        <div id="i18n_sp_step2_title" class="step-title">Open an Empty Playlist in Spotify &amp; Press Ctrl+V</div>
+                        <div id="i18n_sp_step2_desc" class="step-text">
+                            Create a new playlist in Spotify, click inside the track list area, and press Ctrl+V (Paste). All tracks will be added instantly.
                         </div>
                     </div>
                 </div>
@@ -1069,8 +1086,61 @@ HTML_TEMPLATE = r"""
 </div>
 
 <script>
+const LANGUAGES = {{ languages_json | safe }};
+const I18N = {{ translations_json | safe }};
+let CURRENT_LANG = localStorage.getItem("sp_ytm_lang") || "en";
+if (!I18N[CURRENT_LANG]) CURRENT_LANG = "en";
+
 let CURRENT_PLAYLISTS = [];
 let FILTER_STATE = {};
+
+function t(key) {
+    const dict = I18N[CURRENT_LANG] || I18N["en"];
+    return dict[key] || I18N["en"][key] || key;
+}
+
+function initLanguageSelector() {
+    const sel = document.getElementById("langSelect");
+    sel.innerHTML = LANGUAGES.map(l =>
+        `<option value="${l.code}" ${l.code === CURRENT_LANG ? "selected" : ""}>${l.name}</option>`
+    ).join("");
+    applyTranslations();
+}
+
+function changeLanguage(langCode) {
+    if (!I18N[langCode]) langCode = "en";
+    CURRENT_LANG = langCode;
+    localStorage.setItem("sp_ytm_lang", langCode);
+    applyTranslations();
+    renderPlaylists();
+}
+
+function applyTranslations() {
+    document.documentElement.lang = CURRENT_LANG;
+    document.documentElement.dir = CURRENT_LANG === "ar" ? "rtl" : "ltr";
+
+    const ids = [
+        "subtitle", "export_json", "clear_all", "source_links", "auto_detect",
+        "input_desc", "replace_existing", "scan_btn", "guide_title",
+        "ytm_step1_title", "ytm_step1_desc", "ytm_step2_title", "ytm_step2_desc",
+        "open_ytm", "ytm_step3_title", "ytm_step3_desc", "ytm_step3_note",
+        "sp_step1_title", "sp_step1_desc", "open_sp", "sp_step2_title", "sp_step2_desc"
+    ];
+    ids.forEach(k => {
+        const el = document.getElementById("i18n_" + k);
+        if (el) el.innerText = t(k);
+    });
+
+    document.getElementById("guideTabYTM").innerText = t("tab_save_ytm");
+    document.getElementById("guideTabSP").innerText = t("tab_save_sp");
+    document.getElementById("i18n_copy_btn_box").innerText = t("copy_btn");
+
+    const drawer = document.getElementById("codeDrawer");
+    const isOpen = drawer && drawer.classList.contains("open");
+    document.getElementById("toggleCodeLabel").innerText = isOpen ? t("hide_code") : t("show_code");
+
+    updateGuideButtons();
+}
 
 function formatDuration(sec) {
     if (!sec || sec <= 0) return "--:--";
@@ -1112,7 +1182,7 @@ function buildYTMConsoleScript(targetIndex) {
         "  const playlists = " + JSON.stringify(payload) + ";",
         "  const m = document.cookie.match(/(?:^|; )(?:__Secure-3PAPISID|SAPISID)=([^;]+)/);",
         "  const sapisid = m ? m[1] : null;",
-        "  if (!sapisid) { alert('Lütfen önce YouTube Music hesabınıza giriş yapın.'); return; }",
+        "  if (!sapisid) { alert('Please sign in to YouTube Music first.'); return; }",
         "  const origin = 'https://music.youtube.com';",
         "  async function getAuth() {",
         "    const ts = Math.floor(Date.now() / 1000);",
@@ -1127,7 +1197,7 @@ function buildYTMConsoleScript(targetIndex) {
         "  const authUser = String(cfg.get('SESSION_INDEX') || '0');",
         "  const created = [];",
         "  for (const pl of playlists) {",
-        "    console.log('[Aktarım] Oluşturuluyor:', pl.title, '(' + pl.videoIds.length + ' şarkı)...');",
+        "    console.log('[Transfer] Creating:', pl.title, '(' + pl.videoIds.length + ' tracks)...');",
         "    const res = await fetch('/youtubei/v1/playlist/create?key=' + apiKey + '&prettyPrint=false', {",
         "      method: 'POST',",
         "      credentials: 'include',",
@@ -1140,21 +1210,21 @@ function buildYTMConsoleScript(targetIndex) {
         "      body: JSON.stringify({",
         "        context,",
         "        title: pl.title,",
-        "        description: 'Spotify <-> YouTube Music aracı ile aktarıldı.',",
+        "        description: 'Transferred via Spotify <-> YouTube Music Lyrics Transfer.',",
         "        privacyStatus: 'PRIVATE',",
         "        videoIds: pl.videoIds",
         "      })",
         "    }).then(r => r.json());",
         "    if (res.playlistId) {",
         "      const url = 'https://music.youtube.com/playlist?list=' + res.playlistId;",
-        "      console.log('[Tamamlandı]', pl.title, '->', url);",
+        "      console.log('[Created]', pl.title, '->', url);",
         "      created.push({title: pl.title, url, count: pl.videoIds.length});",
         "    } else {",
-        "      console.error('[Hata]', pl.title, res);",
+        "      console.error('[Error]', pl.title, res);",
         "    }",
         "  }",
         "  if (created.length > 0) {",
-        "    alert('Çalma listeleri oluşturuldu:\\n\\n' + created.map(c => '• ' + c.title + ' (' + c.count + ' şarkı)').join('\\n'));",
+        "    alert('Playlists created:\\n\\n' + created.map(c => '• ' + c.title + ' (' + c.count + ')').join('\\n'));",
         "    window.location.href = created[0].url;",
         "  }",
         "})();"
@@ -1199,7 +1269,7 @@ function flashButtonCopied(btn, originalText) {
     if (!btn) return;
     const span = btn.querySelector("span") || btn;
     const prev = originalText || span.innerText;
-    span.innerText = "Kopyalandı ✓";
+    span.innerText = t("copied");
     setTimeout(() => {
         span.innerText = prev;
     }, 2200);
@@ -1207,33 +1277,27 @@ function flashButtonCopied(btn, originalText) {
 
 function copyYTMConsoleScript(targetIndex, btnEl) {
     const scriptText = buildYTMConsoleScript(targetIndex);
-    if (!scriptText) {
-        alert("Kopyalanacak Spotify -> YouTube Music listesi bulunamadı.");
-        return;
-    }
+    if (!scriptText) return;
     switchGuideMode("sp_to_ytm");
     writeToClipboard(scriptText);
     const span = btnEl ? (btnEl.querySelector("span") || btnEl) : null;
-    flashButtonCopied(btnEl, span ? span.innerText : "Kopyala");
+    flashButtonCopied(btnEl, span ? span.innerText : t("copy_btn"));
 }
 
 function copySpotifyTrackLinks(targetIndex, btnEl) {
     const linksText = buildSpotifyTrackLinks(targetIndex);
-    if (!linksText) {
-        alert("Kopyalanacak YouTube Music -> Spotify listesi bulunamadı.");
-        return;
-    }
+    if (!linksText) return;
     switchGuideMode("ytm_to_sp");
     writeToClipboard(linksText);
     const span = btnEl ? (btnEl.querySelector("span") || btnEl) : null;
-    flashButtonCopied(btnEl, span ? span.innerText : "Linkleri Kopyala");
+    flashButtonCopied(btnEl, span ? span.innerText : t("copy_btn"));
 }
 
 function toggleCodeDrawer() {
     const drawer = document.getElementById("codeDrawer");
     const label = document.getElementById("toggleCodeLabel");
     const isOpen = drawer.classList.toggle("open");
-    label.innerText = isOpen ? "Kodu Gizle" : "Kodu Göster";
+    label.innerText = isOpen ? t("hide_code") : t("show_code");
     if (isOpen) {
         document.getElementById("manualCodeBox").value = buildYTMConsoleScript(-1);
     }
@@ -1245,22 +1309,19 @@ function copyFromCodeBox(btnEl) {
         box.value = buildYTMConsoleScript(-1);
     }
     writeToClipboard(box.value);
-    flashButtonCopied(btnEl, "Kopyala");
+    flashButtonCopied(btnEl, t("copy_btn"));
 }
 
 async function startProcess() {
     const raw = document.getElementById("urlsInput").value.trim();
-    if (!raw) {
-        alert("Lütfen en az bir Spotify veya YouTube Music bağlantısı girin.");
-        return;
-    }
+    if (!raw) return;
     const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
     const clearExisting = document.getElementById("replaceCheck").checked;
 
     document.getElementById("startBtn").disabled = true;
     const pBox = document.getElementById("progressBox");
     pBox.style.display = "block";
-    document.getElementById("progressText").innerText = "Bağlantılar okunuyor...";
+    document.getElementById("progressText").innerText = t("preparing");
     document.getElementById("progressPct").innerText = "0%";
     document.getElementById("progressFill").style.width = "0%";
 
@@ -1278,7 +1339,7 @@ async function pollStatus() {
 
     const pBox = document.getElementById("progressBox");
     pBox.style.display = "block";
-    document.getElementById("progressText").innerText = st.message || "İşleniyor...";
+    document.getElementById("progressText").innerText = st.message || t("preparing");
 
     const pct = st.total > 0 ? Math.min(100, Math.round((st.current / st.total) * 100)) : (st.running ? 15 : 100);
     document.getElementById("progressPct").innerText = pct + "%";
@@ -1311,7 +1372,7 @@ async function removePlaylist(plIdx) {
 
 async function clearAllPlaylists() {
     if (!CURRENT_PLAYLISTS.length) return;
-    if (!confirm("Yüklü tüm çalma listelerini ekrandan temizlemek istiyor musunuz?")) return;
+    if (!confirm(t("confirm_clear"))) return;
     const r = await fetch("/api/clear", {method: "POST"});
     const st = await r.json();
     CURRENT_PLAYLISTS = st.playlists || [];
@@ -1319,10 +1380,7 @@ async function clearAllPlaylists() {
 }
 
 function exportJSON() {
-    if (!CURRENT_PLAYLISTS.length) {
-        alert("İndirilecek veri bulunmuyor.");
-        return;
-    }
+    if (!CURRENT_PLAYLISTS.length) return;
     const blob = new Blob([JSON.stringify(CURRENT_PLAYLISTS, null, 2)], {type: "application/json"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1351,18 +1409,26 @@ function updateGuideButtons() {
     const ytmCount = ytmLists.reduce((a, p) => a + (p.total_tracks || 0), 0);
     const spCount = spLists.reduce((a, p) => a + (p.total_tracks || 0), 0);
 
-    const ytmBtn = document.getElementById("copyAllYTMBtn");
+    const ytmBtn = document.getElementById("i18n_copy_ytm_code");
     if (ytmBtn) {
-        const sp = ytmBtn.querySelector("span");
-        if (sp) sp.innerText = ytmCount > 0 ? `YouTube Music Kodunu Kopyala (${ytmCount} Şarkı)` : "YouTube Music Kodunu Kopyala";
+        ytmBtn.innerText = ytmCount > 0 ? `${t("copy_ytm_code")} (${ytmCount})` : t("copy_ytm_code");
     }
-    const spBtn = document.getElementById("copyAllSPBtn");
+    const spBtn = document.getElementById("i18n_copy_sp_links");
     if (spBtn) {
-        const sp = spBtn.querySelector("span");
-        if (sp) sp.innerText = spCount > 0 ? `Spotify Şarkı Linklerini Kopyala (${spCount} Şarkı)` : "Spotify Şarkı Linklerini Kopyala";
+        spBtn.innerText = spCount > 0 ? `${t("copy_sp_links")} (${spCount})` : t("copy_sp_links");
     }
     const codeBox = document.getElementById("manualCodeBox");
     if (codeBox) codeBox.value = buildYTMConsoleScript(-1);
+}
+
+function formatStatusMethod(item) {
+    if (item.status === "direct_match") return t("stat_direct");
+    if (item.status === "lyrics_match") {
+        const src = item.lyrics_info && item.lyrics_info.source ? ` (${item.lyrics_info.source})` : "";
+        return t("stat_lyrics") + src;
+    }
+    if (item.status === "low_confidence") return t("stat_low");
+    return t("stat_none");
 }
 
 function renderPlaylists() {
@@ -1372,8 +1438,8 @@ function renderPlaylists() {
     if (!CURRENT_PLAYLISTS || CURRENT_PLAYLISTS.length === 0) {
         area.innerHTML = `
             <div class="empty-state">
-                <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">Henüz Çalma Listesi Eklenmedi</div>
-                <div>Sol üstteki kutuya bir <strong>Spotify</strong> veya <strong>YouTube Music</strong> çalma listesi bağlantısı yapıştırıp <strong>Şarkıları Tara ve Eşleştir</strong> butonuna basın.</div>
+                <div style="font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px;">${escapeHtml(t("empty_title"))}</div>
+                <div>${escapeHtml(t("empty_desc"))}</div>
             </div>
         `;
         return;
@@ -1387,8 +1453,8 @@ function renderPlaylists() {
             ? `<span class="brand-tag dir-tag-sp">YouTube Music &rarr; Spotify</span>`
             : `<span class="brand-tag dir-tag-ytm">Spotify &rarr; YouTube Music</span>`;
 
-        const srcColTitle = isYTMToSP ? "YouTube Music Parçası" : "Spotify Parçası";
-        const dstColTitle = isYTMToSP ? "Spotify Eşleşmesi" : "YouTube Music Eşleşmesi";
+        const srcColTitle = isYTMToSP ? t("col_ytm_track") : t("col_sp_track");
+        const dstColTitle = isYTMToSP ? t("col_sp_match") : t("col_ytm_match");
 
         const actionBtn = isYTMToSP
             ? `<button type="button" class="btn btn-accent btn-sm" onclick="copySpotifyTrackLinks(${idx}, this)">
@@ -1396,23 +1462,23 @@ function renderPlaylists() {
                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                    </svg>
-                   <span>Spotify Şarkı Linklerini Kopyala</span>
+                   <span>${escapeHtml(t("copy_sp_links"))}</span>
                </button>`
             : `<button type="button" class="btn btn-accent btn-sm" onclick="copyYTMConsoleScript(${idx}, this)">
                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                    </svg>
-                   <span>YouTube Music Kodunu Kopyala</span>
+                   <span>${escapeHtml(t("copy_ytm_code"))}</span>
                </button>`;
 
-        const queueLinks = (pl.instant_links || []).map(l =>
-            `<a class="btn btn-sm mono" href="${l.youtube_queue_url}" target="_blank" rel="noopener">${escapeHtml(l.label)} ↗</a>`
+        const queueLinks = (pl.instant_links || []).map((l, qIdx) =>
+            `<a class="btn btn-sm mono" href="${l.youtube_queue_url}" target="_blank" rel="noopener">#${qIdx + 1} (${l.count}) ↗</a>`
         ).join("");
 
         const queueSection = (!isYTMToSP && queueLinks)
             ? `<div class="queue-bar">
-                   <span>Giriş yapmadan direkt YouTube çalma kuyruğu olarak aç:</span>
+                   <span>${escapeHtml(t("queue_label"))}</span>
                    <div style="display:flex; gap:6px; flex-wrap:wrap;">${queueLinks}</div>
                </div>`
             : "";
@@ -1425,19 +1491,19 @@ function renderPlaylists() {
                     <div class="playlist-title-row">
                         <span class="playlist-name">${escapeHtml(pl.title)}</span>
                         ${dirBadge}
-                        <span class="brand-tag mono">${pl.total_tracks} şarkı</span>
+                        <span class="brand-tag mono">${pl.total_tracks} ${escapeHtml(t("tracks_word"))}</span>
                     </div>
                     <div class="stat-pills">
-                        <span class="pill"><span class="pill-dot dot-green"></span>Bire Bir: <strong class="mono">${pl.stats.direct_match}</strong></span>
-                        <span class="pill"><span class="pill-dot dot-sky"></span>Sözlerle Eşleşen: <strong class="mono">${pl.stats.lyrics_match}</strong></span>
-                        <span class="pill"><span class="pill-dot dot-amber"></span>Yakın Eşleşme: <strong class="mono">${pl.stats.low_confidence}</strong></span>
-                        <span class="pill"><span class="pill-dot dot-red"></span>Bulunamayan: <strong class="mono">${pl.stats.not_found}</strong></span>
+                        <span class="pill"><span class="pill-dot dot-green"></span>${escapeHtml(t("stat_direct"))}: <strong class="mono">${pl.stats.direct_match}</strong></span>
+                        <span class="pill"><span class="pill-dot dot-sky"></span>${escapeHtml(t("stat_lyrics"))}: <strong class="mono">${pl.stats.lyrics_match}</strong></span>
+                        <span class="pill"><span class="pill-dot dot-amber"></span>${escapeHtml(t("stat_low"))}: <strong class="mono">${pl.stats.low_confidence}</strong></span>
+                        <span class="pill"><span class="pill-dot dot-red"></span>${escapeHtml(t("stat_none"))}: <strong class="mono">${pl.stats.not_found}</strong></span>
                     </div>
                 </div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     ${actionBtn}
-                    <button type="button" class="btn btn-sm btn-ghost" onclick="removePlaylist(${idx})" title="Listeyi Kaldır">
-                        Kaldır
+                    <button type="button" class="btn btn-sm btn-ghost" onclick="removePlaylist(${idx})">
+                        ${escapeHtml(t("remove_btn"))}
                     </button>
                 </div>
             </div>
@@ -1446,12 +1512,12 @@ function renderPlaylists() {
 
             <div class="playlist-toolbar">
                 <div class="filter-tabs" id="tabs_${idx}">
-                    <button type="button" class="tab-btn active" data-tab="all" onclick="setFilterTab(${idx}, 'all')">Tümü (${pl.total_tracks})</button>
-                    <button type="button" class="tab-btn" data-tab="direct_match" onclick="setFilterTab(${idx}, 'direct_match')">Bire Bir (${pl.stats.direct_match})</button>
-                    <button type="button" class="tab-btn" data-tab="lyrics_match" onclick="setFilterTab(${idx}, 'lyrics_match')">Sözlerle Bulunanlar (${pl.stats.lyrics_match})</button>
-                    <button type="button" class="tab-btn" data-tab="review" onclick="setFilterTab(${idx}, 'review')">İnceleme (${pl.stats.low_confidence + pl.stats.not_found})</button>
+                    <button type="button" class="tab-btn active" data-tab="all" onclick="setFilterTab(${idx}, 'all')">${escapeHtml(t("filter_all"))} (${pl.total_tracks})</button>
+                    <button type="button" class="tab-btn" data-tab="direct_match" onclick="setFilterTab(${idx}, 'direct_match')">${escapeHtml(t("filter_direct"))} (${pl.stats.direct_match})</button>
+                    <button type="button" class="tab-btn" data-tab="lyrics_match" onclick="setFilterTab(${idx}, 'lyrics_match')">${escapeHtml(t("filter_lyrics"))} (${pl.stats.lyrics_match})</button>
+                    <button type="button" class="tab-btn" data-tab="review" onclick="setFilterTab(${idx}, 'review')">${escapeHtml(t("filter_review"))} (${pl.stats.low_confidence + pl.stats.not_found})</button>
                 </div>
-                <input type="text" class="search-input" placeholder="Şarkı, sanatçı veya söz ara..." oninput="setFilterQuery(${idx}, this.value)">
+                <input type="text" class="search-input" placeholder="${escapeHtml(t("search_placeholder"))}" oninput="setFilterQuery(${idx}, this.value)">
             </div>
 
             <div class="table-wrap">
@@ -1459,10 +1525,10 @@ function renderPlaylists() {
                     <thead>
                         <tr>
                             <th style="width:48px;">#</th>
-                            <th>${srcColTitle}</th>
-                            <th style="width:68px;">Süre</th>
-                            <th>${dstColTitle}</th>
-                            <th style="width:170px;">Eşleşme Yöntemi</th>
+                            <th>${escapeHtml(srcColTitle)}</th>
+                            <th style="width:68px;">${escapeHtml(t("col_duration"))}</th>
+                            <th>${escapeHtml(dstColTitle)}</th>
+                            <th style="width:180px;">${escapeHtml(t("col_method"))}</th>
                         </tr>
                     </thead>
                     <tbody id="tbody_${idx}"></tbody>
@@ -1517,7 +1583,7 @@ function renderPlaylistRows(plIdx) {
         else if (item.status === "low_confidence") stClass = "st-low";
 
         const lyricLine = (li && li.matched_snippet)
-            ? `<div><span class="lyric-quote">Söz: "${escapeHtml(li.matched_snippet)}" (${li.lyrics_similarity}%)</span></div>`
+            ? `<div><span class="lyric-quote">${escapeHtml(t("lyric_prefix"))}: "${escapeHtml(li.matched_snippet)}" (${li.lyrics_similarity}%)</span></div>`
             : "";
 
         const thumbImg = (yt && yt.thumbnail)
@@ -1529,7 +1595,7 @@ function renderPlaylistRows(plIdx) {
                 <td class="mono" style="color:var(--text-muted);">${i + 1}</td>
                 <td>
                     <span class="track-title">${escapeHtml(sp.name)}</span>
-                    <span class="track-artist">${escapeHtml(sp.artist_str || "Bilinmeyen Sanatçı")}</span>
+                    <span class="track-artist">${escapeHtml(sp.artist_str || t("unknown_artist"))}</span>
                 </td>
                 <td class="mono" style="color:var(--text-secondary);">${formatDuration(sp.duration_sec)}</td>
                 <td>
@@ -1538,15 +1604,15 @@ function renderPlaylistRows(plIdx) {
                             ${thumbImg}
                             <div>
                                 <a class="yt-link" href="${escapeHtml(yt.url)}" target="_blank" rel="noopener">${escapeHtml(yt.title)}</a>
-                                <div class="track-artist">${escapeHtml(yt.artists)} · <span class="mono">${formatDuration(yt.duration_sec)}</span> · ${escapeHtml(yt.resultType)}</div>
+                                <div class="track-artist">${escapeHtml(yt.artists)} · <span class="mono">${formatDuration(yt.duration_sec)}</span></div>
                                 ${lyricLine}
                             </div>
                         </div>
-                    ` : `<span style="color:var(--danger);">Eşleşme bulunamadı</span>`}
+                    ` : `<span style="color:var(--danger);">${escapeHtml(t("not_found_text"))}</span>`}
                 </td>
                 <td>
                     <span class="status-tag ${stClass}">
-                        <span>${escapeHtml(item.match_method)}</span>
+                        <span>${escapeHtml(formatStatusMethod(item))}</span>
                         <span class="mono">${item.confidence}%</span>
                     </span>
                 </td>
@@ -1555,11 +1621,12 @@ function renderPlaylistRows(plIdx) {
     });
 
     if (!html) {
-        html = `<tr><td colspan="5" style="text-align:center; padding:28px; color:var(--text-muted);">Bu filtreye uygun şarkı bulunamadı.</td></tr>`;
+        html = `<tr><td colspan="5" style="text-align:center; padding:28px; color:var(--text-muted);">${escapeHtml(t("no_filter_match"))}</td></tr>`;
     }
     tbody.innerHTML = html;
 }
 
+initLanguageSelector();
 fetch("/api/status").then(r => r.json()).then(st => {
     CURRENT_PLAYLISTS = st.playlists || [];
     renderPlaylists();
@@ -1573,7 +1640,11 @@ fetch("/api/status").then(r => r.json()).then(st => {
 
 @app.route("/")
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(
+        HTML_TEMPLATE,
+        languages_json=json.dumps(LANGUAGES, ensure_ascii=False),
+        translations_json=json.dumps(TRANSLATIONS, ensure_ascii=False),
+    )
 
 
 @app.route("/api/start", methods=["POST"])
@@ -1582,7 +1653,7 @@ def api_start():
     urls = data.get("urls", [])
     clear_existing = bool(data.get("clear_existing", False))
     if STATE["running"]:
-        return jsonify({"ok": False, "error": "Şu anda bir tarama işlemi devam ediyor."})
+        return jsonify({"ok": False, "error": "A scan is already in progress."})
 
     t = threading.Thread(target=process_urls, args=(urls, clear_existing), daemon=True)
     t.start()
@@ -1619,17 +1690,17 @@ def api_clear():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Spotify <-> YouTube Music Çift Yönlü Söz Eşleştirmeli Aktarım Aracı")
-    parser.add_argument("urls", nargs="*", help="Aktarılacak Spotify veya YouTube Music linkleri")
-    parser.add_argument("--web", action="store_true", help="Web arayüzünü başlat (http://127.0.0.1:5050)")
-    parser.add_argument("--port", type=int, default=5050, help="Web arayüzü portu")
+    parser = argparse.ArgumentParser(description="Spotify <-> YouTube Music Bi-Directional Lyrics-Aware Transfer")
+    parser.add_argument("urls", nargs="*", help="Spotify or YouTube Music playlist/album/track URLs to transfer")
+    parser.add_argument("--web", action="store_true", help="Start the local web UI (http://127.0.0.1:5050)")
+    parser.add_argument("--port", type=int, default=5050, help="Port for the web UI")
     args = parser.parse_args()
 
     if args.urls:
         process_urls(args.urls)
 
     if args.web or not args.urls:
-        print(f"\n[Web Arayüzü] http://127.0.0.1:{args.port} adresinde çalışıyor...")
+        print(f"\n[Web UI] Running at http://127.0.0.1:{args.port} ...")
         app.run(host="127.0.0.1", port=args.port, debug=False)
 
 
