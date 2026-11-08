@@ -218,7 +218,15 @@ class YTMToSpotifyMatcher:
                         pass
 
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser = None
+                for ch in ("msedge", "chrome", None):
+                    try:
+                        browser = p.chromium.launch(channel=ch, headless=True) if ch else p.chromium.launch(headless=True)
+                        break
+                    except Exception:
+                        continue
+                if not browser:
+                    raise RuntimeError("No browser found (Edge/Chrome/Chromium).")
                 page = browser.new_page()
                 page.on("request", on_req)
                 page.goto("https://open.spotify.com/search/music", wait_until="networkidle", timeout=30000)

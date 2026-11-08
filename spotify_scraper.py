@@ -149,7 +149,15 @@ class SpotifyScraper:
         try:
             with sync_playwright() as p:
                 if headless:
-                    browser = p.chromium.launch(headless=True)
+                    browser = None
+                    for ch in ("msedge", "chrome", None):
+                        try:
+                            browser = p.chromium.launch(channel=ch, headless=True) if ch else p.chromium.launch(headless=True)
+                            break
+                        except Exception:
+                            continue
+                    if not browser:
+                        raise RuntimeError("No browser found (Edge/Chrome/Chromium).")
                     context = browser.new_context(user_agent=self.USER_AGENT)
                 else:
                     self.profile_dir.mkdir(parents=True, exist_ok=True)

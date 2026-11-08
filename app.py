@@ -1690,9 +1690,11 @@ def api_clear():
 
 
 def main():
+    import webbrowser
     parser = argparse.ArgumentParser(description="Spotify <-> YouTube Music Bi-Directional Lyrics-Aware Transfer")
     parser.add_argument("urls", nargs="*", help="Spotify or YouTube Music playlist/album/track URLs to transfer")
     parser.add_argument("--web", action="store_true", help="Start the local web UI (http://127.0.0.1:5050)")
+    parser.add_argument("--open", action="store_true", help="Automatically open the web UI in the default browser")
     parser.add_argument("--port", type=int, default=5050, help="Port for the web UI")
     args = parser.parse_args()
 
@@ -1700,7 +1702,10 @@ def main():
         process_urls(args.urls)
 
     if args.web or not args.urls:
-        print(f"\n[Web UI] Running at http://127.0.0.1:{args.port} ...")
+        url = f"http://127.0.0.1:{args.port}"
+        print(f"\n[Web UI] Running at {url} ...")
+        if args.open:
+            threading.Timer(1.2, lambda: webbrowser.open(url)).start()
         app.run(host="127.0.0.1", port=args.port, debug=False)
 
 
