@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Local runtime & session data (never commit personal playlists or browser profiles)
+last_transfer_results.json
+browser_auth.json
+ytm_browser_profile/
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
