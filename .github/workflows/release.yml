@@ -28,7 +28,7 @@ jobs:
 
       - name: Build single-file Windows .exe
         run: |
-          pyinstaller --noconfirm --onefile --name "Spotify-YouTube-Music-Transfer" app.py
+          pyinstaller --noconfirm --onefile --collect-data ytmusicapi --collect-data playwright --name "Spotify-YouTube-Music-Transfer" app.py
 
       - name: Upload Windows Executable Artifact
         uses: actions/upload-artifact@v4

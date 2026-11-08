@@ -1,34 +1,37 @@
-# sp2ytm
+# spotify-youtube-music-transfer
 
-[English](../../README.md) ? [Türkçe](README.tr.md) ? [Español](README.es.md) ? [中文 (简体)](README.zh.md) ? [हिन्दी](README.hi.md) ? [العربية](README.ar.md) ? [Português](README.pt.md) ? [Русский](README.ru.md) ? [日本語](README.ja.md) ? **Deutsch** ? [Français](README.fr.md) ? [한국어](README.ko.md) ? [Italiano](README.it.md) ? [Bahasa Indonesia](README.id.md) ? [Tiếng Việt](README.vi.md) ? [Polski](README.pl.md) ? [Українська](README.uk.md) ? [Nederlands](README.nl.md) ? [ไทย](README.th.md) ? [Svenska](README.sv.md)
+[English](../../README.md) · [Türkçe](README.tr.md) · [Español](README.es.md) · [中文 (简体)](README.zh.md) · [हिन्दी](README.hi.md) · [العربية](README.ar.md) · [Português](README.pt.md) · [Русский](README.ru.md) · [日本語](README.ja.md) · **Deutsch** · [Français](README.fr.md) · [한국어](README.ko.md) · [Italiano](README.it.md) · [Bahasa Indonesia](README.id.md) · [Tiếng Việt](README.vi.md) · [Polski](README.pl.md) · [Українська](README.uk.md) · [Nederlands](README.nl.md) · [ไทย](README.th.md) · [Svenska](README.sv.md)
 
-Bidirektionaler Playlist-Transfer & Songtext-Abgleich ohne API-Schlüssel.
+Bidirektionaler Playlist-Transfer & Songtext-Abgleich ohne API-Schlüssel
 
 Spotify-Links einfügen für YouTube Music-Abgleich, oder YouTube Music-Links für Spotify-Abgleich.
 
+![Web UI Preview](../preview.png)
+
 ## Quick Start
 
+- **Windows (.exe):** [https://github.com/Myusufbasci/spotify-youtube-music-transfer/releases/latest](https://github.com/Myusufbasci/spotify-youtube-music-transfer/releases/latest) → `Spotify-YouTube-Music-Transfer.exe`
+- **Windows (Script):** `Start-Windows.bat`
+- **macOS / Linux:** `start-mac-linux.command`
+
 ```bash
-git clone https://github.com/Myusufbasci/sp2ytm.git
-cd sp2ytm
+git clone https://github.com/Myusufbasci/spotify-youtube-music-transfer.git
+cd spotify-youtube-music-transfer
 
 pip install -r requirements.txt
-playwright install chromium
-python app.py --web --port 5050
+python app.py --web --open --port 5050
 ```
-
-Open `http://127.0.0.1:5050`.
 
 ## Anleitung zum Speichern
 
 ### In YouTube Music speichern
-1. **YouTube Music Transfer-Skript kopieren** ? Kopiere das Konsolen-Skript, das alle Playlists in deinem Konto erstellt.
-2. **YouTube Music in neuem Tab öffnen** ? Wechsle zu einem Tab, in dem du bei YouTube Music angemeldet bist.
-3. **In die Konsole einfügen & Enter drücken** ? Drücke F12 → Tab Console, füge mit Ctrl+V ein und drücke Enter. (Falls der Browser beim ersten Mal fragt, tippe allow pasting ein und drücke Enter.)
+1. **YouTube Music Transfer-Skript kopieren** — Kopiere das Konsolen-Skript, das alle Playlists in deinem Konto erstellt.
+2. **YouTube Music in neuem Tab öffnen** — Wechsle zu einem Tab, in dem du bei YouTube Music angemeldet bist.
+3. **In die Konsole einfügen & Enter drücken** — Drücke F12 → Tab Console, füge mit Ctrl+V ein und drücke Enter. (Falls der Browser beim ersten Mal fragt, tippe allow pasting ein und drücke Enter.)
 
 ### In Spotify speichern
-1. **Spotify Song-Links kopieren** ? Spotify unterstützt das direkte Einfügen kopierter Song-Links in jede Playlist.
-2. **Leere Playlist in Spotify öffnen & Ctrl+V drücken** ? Erstelle eine neue Playlist in Spotify, klicke hinein und drücke Ctrl+V.
+1. **Spotify Song-Links kopieren** — Spotify unterstützt das direkte Einfügen kopierter Song-Links in jede Playlist.
+2. **Leere Playlist in Spotify öffnen & Ctrl+V drücken** — Erstelle eine neue Playlist in Spotify, klicke hinein und drücke Ctrl+V.
 
 ## License
 

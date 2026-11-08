@@ -2,6 +2,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Dict, List
@@ -15,7 +16,10 @@ from i18n import LANGUAGES, TRANSLATIONS
 
 app = Flask(__name__)
 
-BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_FILE = BASE_DIR / "last_transfer_results.json"
 
 scraper = SpotifyScraper()
@@ -1704,7 +1708,8 @@ def main():
     if args.web or not args.urls:
         url = f"http://127.0.0.1:{args.port}"
         print(f"\n[Web UI] Running at {url} ...")
-        if args.open:
+        should_open = args.open or (not args.urls and not args.web)
+        if should_open:
             threading.Timer(1.2, lambda: webbrowser.open(url)).start()
         app.run(host="127.0.0.1", port=args.port, debug=False)
 
